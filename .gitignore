@@ -112,3 +112,12 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# --- Blender working files ---
+# Raw .blend source files live in Assets/Models/_Source for editing.
+# They are committed for version history, but their Unity-generated .meta
+# files and Blender autosave/backup noise should be ignored.
+*.blend@
+*.blend[0-9][0-9]
+# Blender temp/autosave
+*.blend.autosave
