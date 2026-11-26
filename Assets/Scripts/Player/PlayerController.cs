@@ -19,11 +19,18 @@ public class PlayerController : MonoBehaviour
     [SerializeField] Transform frontRightWheel;
     [SerializeField] float maxWheelSteerAngle = 30f;
     [SerializeField] float wheelSteerSmoothing = 12f;
-    [Tooltip("Local axis the wheels pivot around when steering.")]
-    [SerializeField] Vector3 wheelSteerAxis = Vector3.up;
 
+    // Per-wheel data so each wheel group turns about the vertical axis through its own center.
+    class SteerWheel
+    {
+        public Transform t;
+        public Quaternion restRot;      // rotation relative to the kart root
+        public Vector3 centerLocal;     // wheel center in kart-root space
+        public Vector3 pivotOffset;     // pivot position minus center, in kart-root space
+    }
+
+    SteerWheel leftWheel, rightWheel;
     Rigidbody rb;
-    Quaternion leftRestRotation, rightRestRotation;
     float throttle, steer;
     bool jumpQueued;
     float currentWheelAngle;
@@ -33,8 +40,39 @@ public class PlayerController : MonoBehaviour
         rb = GetComponent<Rigidbody>();
         rb.interpolation = RigidbodyInterpolation.Interpolate; // smooth motion for the follow camera
         rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
-        if (frontLeftWheel) leftRestRotation = frontLeftWheel.localRotation;
-        if (frontRightWheel) rightRestRotation = frontRightWheel.localRotation;
+        leftWheel = SetupWheel(frontLeftWheel);
+        rightWheel = SetupWheel(frontRightWheel);
+    }
+
+    SteerWheel SetupWheel(Transform wheel)
+    {
+        if (!wheel) return null;
+
+        // Wheel center = middle of all meshes under the wheel group
+        Vector3 center = wheel.position;
+        var renderers = wheel.GetComponentsInChildren<Renderer>();
+        if (renderers.Length > 0)
+        {
+            Bounds b = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++) b.Encapsulate(renderers[i].bounds);
+            center = b.center;
+        }
+
+        return new SteerWheel
+        {
+            t = wheel,
+            restRot = Quaternion.Inverse(transform.rotation) * wheel.rotation,
+            centerLocal = transform.InverseTransformPoint(center),
+            pivotOffset = transform.InverseTransformPoint(wheel.position) - transform.InverseTransformPoint(center)
+        };
+    }
+
+    void SteerWheelTo(SteerWheel w, float angle)
+    {
+        if (w == null) return;
+        Quaternion steerRot = Quaternion.AngleAxis(angle, Vector3.up); // kart-root vertical axis
+        w.t.rotation = transform.rotation * steerRot * w.restRot;
+        w.t.position = transform.TransformPoint(w.centerLocal) + transform.rotation * (steerRot * w.pivotOffset);
     }
 
     void Update()
@@ -118,9 +156,7 @@ public class PlayerController : MonoBehaviour
     {
         float target = steer * maxWheelSteerAngle;
         currentWheelAngle = Mathf.Lerp(currentWheelAngle, target, 1f - Mathf.Exp(-wheelSteerSmoothing * Time.deltaTime));
-        Quaternion steerRot = Quaternion.AngleAxis(currentWheelAngle, wheelSteerAxis);
-
-        if (frontLeftWheel) frontLeftWheel.localRotation = leftRestRotation * steerRot;
-        if (frontRightWheel) frontRightWheel.localRotation = rightRestRotation * steerRot;
+        SteerWheelTo(leftWheel, currentWheelAngle);
+        SteerWheelTo(rightWheel, currentWheelAngle);
     }
 }
