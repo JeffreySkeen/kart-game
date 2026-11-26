@@ -1,0 +1,319 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+public enum TrackSegmentType
+{
+    Straight,
+    RightTurn,
+    LeftTurn
+}
+
+/// <summary>
+/// Builds one continuous road mesh from a list of preset segments.
+/// The track starts at this object's origin, heading along +Z, and is built in local space.
+/// The top surface of the road sits at local Y = 0.
+/// </summary>
+[ExecuteAlways]
+[RequireComponent(typeof(MeshFilter), typeof(MeshRenderer), typeof(MeshCollider))]
+public class TrackGenerator : MonoBehaviour
+{
+    [Header("Layout")]
+    [SerializeField] List<TrackSegmentType> segments = new List<TrackSegmentType>();
+    [Tooltip("Tick when the layout should end exactly where it started. Joins the last ring to the first.")]
+    [SerializeField] bool closeLoop = true;
+
+    [Header("Segment presets")]
+    [SerializeField] float roadWidth = 16f;       // Straight.glb was 12; widened for easier driving
+    [SerializeField] float straightLength = 16f;  // matches Straight.glb
+    [SerializeField] float turnRadius = 24f;      // radius of the road's center line
+    [SerializeField] float turnAngle = 90f;       // degrees per turn segment
+    [SerializeField] float edgeDepth = 2f;        // how far the side walls drop below the surface
+
+    [Header("Mesh detail")]
+    [SerializeField] float straightStep = 4f;     // meters between cross-sections on straights
+    [SerializeField] float turnStepDegrees = 5f;  // degrees between cross-sections on turns
+
+    [Header("Rendering")]
+    [SerializeField] Material roadMaterial;
+
+    [Header("Street lights")]
+    [SerializeField] GameObject streetLightPrefab;
+    [SerializeField] float lightSpacing = 16f;        // meters along the center line
+    [Tooltip("Distance from the road edge. Positive = outside the road, negative = onto it.")]
+    [SerializeField] float lightEdgeOffset = 0.5f;
+    [Tooltip("On: a light on each side at every spot. Off: lights alternate left and right.")]
+    [SerializeField] bool lightsBothSides = true;
+
+    const string LightsName = "Track Lights";
+
+    struct Ring
+    {
+        public Vector3 pos;
+        public Vector3 right;
+        public float dist;
+    }
+
+    Mesh mesh;
+
+    // Default layout: a rounded rectangle, 3 + 2 + 3 + 2 straights joined by four right turns.
+    void Reset()
+    {
+        segments = new List<TrackSegmentType>
+        {
+            TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.RightTurn,
+            TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.RightTurn,
+            TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.RightTurn,
+            TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.RightTurn,
+        };
+#if UNITY_EDITOR
+        var lit = Shader.Find("Universal Render Pipeline/Lit");
+        if (lit != null && roadMaterial == null) roadMaterial = new Material(lit) { color = new Color(0.25f, 0.25f, 0.28f) };
+#endif
+        Rebuild();
+    }
+
+    void OnEnable() => ScheduleRebuild();
+
+#if UNITY_EDITOR
+    void OnValidate() => ScheduleRebuild();
+#endif
+
+    void ScheduleRebuild()
+    {
+#if UNITY_EDITOR
+        // In the editor, wait a tick so we never create or destroy objects while Unity is validating or loading.
+        if (!Application.isPlaying)
+        {
+            UnityEditor.EditorApplication.delayCall += () => { if (this != null) Rebuild(); };
+            return;
+        }
+#endif
+        Rebuild();
+    }
+
+    [ContextMenu("Rebuild Track")]
+    public void Rebuild()
+    {
+        var filter = GetComponent<MeshFilter>();
+        var rend = GetComponent<MeshRenderer>();
+        var col = GetComponent<MeshCollider>();
+
+        if (mesh == null)
+        {
+            mesh = new Mesh { name = "Generated Track", hideFlags = HideFlags.DontSave };
+            mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+        }
+        mesh.Clear();
+
+        List<Ring> rings = BuildRings();
+        if (rings.Count >= 2)
+            FillMesh(rings);
+
+        filter.sharedMesh = mesh;
+        if (roadMaterial != null) rend.sharedMaterial = roadMaterial;
+        col.sharedMesh = null; // force the collider to rebuild
+        col.sharedMesh = mesh;
+
+        RebuildLights(rings);
+    }
+
+    // Places the street light prefab along both sides of the center line. Lights are regenerated
+    // on every rebuild and are not saved in the scene.
+    void RebuildLights(List<Ring> rings)
+    {
+        for (int i = transform.childCount - 1; i >= 0; i--)
+        {
+            Transform child = transform.GetChild(i);
+            if (child.name != LightsName) continue;
+            child.name = LightsName + " (old)";
+            if (Application.isPlaying) Destroy(child.gameObject);
+            else DestroyImmediate(child.gameObject);
+        }
+
+        if (streetLightPrefab == null || rings.Count < 2 || lightSpacing < 1f) return;
+
+        var container = new GameObject(LightsName) { hideFlags = HideFlags.DontSave };
+        container.transform.SetParent(transform, false);
+
+        Vector3 prefabOffset = streetLightPrefab.transform.localPosition; // e.g. the light's height
+        float total = rings[rings.Count - 1].dist;
+        float sideDistance = roadWidth * 0.5f + lightEdgeOffset;
+
+        int ringIndex = 0;
+        int placed = 0;
+        for (float d = lightSpacing * 0.5f; d < total; d += lightSpacing)
+        {
+            while (ringIndex < rings.Count - 2 && rings[ringIndex + 1].dist < d) ringIndex++;
+            Ring a = rings[ringIndex];
+            Ring b = rings[ringIndex + 1];
+            float span = Mathf.Max(1e-4f, b.dist - a.dist);
+            float u = Mathf.Clamp01((d - a.dist) / span);
+
+            Vector3 center = Vector3.Lerp(a.pos, b.pos, u);
+            Vector3 right = Vector3.Slerp(a.right, b.right, u).normalized;
+
+            if (lightsBothSides)
+            {
+                PlaceLight(container.transform, center, right, +1f, sideDistance, prefabOffset);
+                PlaceLight(container.transform, center, right, -1f, sideDistance, prefabOffset);
+            }
+            else
+            {
+                PlaceLight(container.transform, center, right, placed % 2 == 0 ? +1f : -1f, sideDistance, prefabOffset);
+            }
+            placed++;
+        }
+    }
+
+    // side: +1 = right edge, -1 = left edge. The light faces the road.
+    void PlaceLight(Transform parent, Vector3 center, Vector3 right, float side,
+                    float sideDistance, Vector3 prefabOffset)
+    {
+        Vector3 inward = -right * side;
+        Quaternion rot = Quaternion.LookRotation(inward, Vector3.up);
+        Vector3 basePos = center + right * (side * sideDistance);
+
+        GameObject go;
+#if UNITY_EDITOR
+        go = UnityEditor.PrefabUtility.InstantiatePrefab(streetLightPrefab, parent) as GameObject;
+#else
+        go = Instantiate(streetLightPrefab, parent);
+#endif
+        go.hideFlags = HideFlags.DontSave;
+        go.transform.localPosition = basePos + rot * prefabOffset;
+        go.transform.localRotation = rot;
+    }
+
+    // Unit vectors for a heading angle (radians, clockwise seen from above, 0 = +Z)
+    static Vector3 Forward(float theta) => new Vector3(Mathf.Sin(theta), 0f, Mathf.Cos(theta));
+    static Vector3 Right(float theta) => new Vector3(Mathf.Cos(theta), 0f, -Mathf.Sin(theta));
+
+    static Ring MakeRing(Vector3 pos, float theta, float dist) =>
+        new Ring { pos = pos, right = Right(theta), dist = dist };
+
+    // Walks the segment list and records a cross-section (ring) every few meters/degrees.
+    List<Ring> BuildRings()
+    {
+        var rings = new List<Ring>();
+        Vector3 pos = Vector3.zero;
+        float theta = 0f;
+        float dist = 0f;
+        rings.Add(MakeRing(pos, theta, dist));
+
+        foreach (var seg in segments)
+        {
+            if (seg == TrackSegmentType.Straight)
+            {
+                int n = Mathf.Max(1, Mathf.CeilToInt(straightLength / Mathf.Max(0.1f, straightStep)));
+                Vector3 f = Forward(theta);
+                for (int j = 1; j <= n; j++)
+                {
+                    float s = straightLength * j / n;
+                    rings.Add(MakeRing(pos + f * s, theta, dist + s));
+                }
+                pos += f * straightLength;
+                dist += straightLength;
+            }
+            else
+            {
+                float k = seg == TrackSegmentType.RightTurn ? 1f : -1f; // +1 turns right, -1 turns left
+                float total = turnAngle * Mathf.Deg2Rad;
+                int n = Mathf.Max(1, Mathf.CeilToInt(turnAngle / Mathf.Max(0.5f, turnStepDegrees)));
+                Vector3 center = pos + k * Right(theta) * turnRadius;
+
+                for (int j = 1; j <= n; j++)
+                {
+                    float phi = total * j / n;
+                    float th = theta + k * phi;
+                    Vector3 p = center - k * Right(th) * turnRadius;
+                    rings.Add(MakeRing(p, th, dist + turnRadius * phi));
+                }
+                theta += k * total;
+                pos = rings[rings.Count - 1].pos;
+                dist += turnRadius * total;
+            }
+        }
+
+        if (closeLoop && rings.Count > 2)
+        {
+            Ring first = rings[0];
+            Ring last = rings[rings.Count - 1];
+            float gap = Vector3.Distance(first.pos, last.pos);
+            if (gap > 0.1f)
+            {
+                Debug.LogWarning($"TrackGenerator: layout does not close (end is {gap:F2} m from the start). " +
+                                 "Opposite straights must have equal total length and the turns must add up to 360°.", this);
+            }
+            else
+            {
+                // Remove the tiny float drift so the last ring sits exactly on the first.
+                last.pos = first.pos;
+                last.right = first.right;
+                rings[rings.Count - 1] = last;
+            }
+        }
+
+        return rings;
+    }
+
+    // Per ring: 0 topLeft, 1 topRight, 2 leftWall top, 3 leftWall bottom, 4 rightWall top, 5 rightWall bottom.
+    // Walls use their own vertices so their edges stay sharp.
+    void FillMesh(List<Ring> rings)
+    {
+        const int PerRing = 6;
+        float half = roadWidth * 0.5f;
+        int count = rings.Count;
+
+        var verts = new Vector3[count * PerRing];
+        var normals = new Vector3[count * PerRing];
+        var uvs = new Vector2[count * PerRing];
+        var tris = new int[(count - 1) * 18];
+
+        for (int i = 0; i < count; i++)
+        {
+            Ring r = rings[i];
+            Vector3 left = r.pos - r.right * half;
+            Vector3 right = r.pos + r.right * half;
+            Vector3 down = Vector3.down * edgeDepth;
+            float v = r.dist / roadWidth; // one texture repeat per road-width of length
+            int b = i * PerRing;
+
+            verts[b + 0] = left;          normals[b + 0] = Vector3.up;  uvs[b + 0] = new Vector2(0f, v);
+            verts[b + 1] = right;         normals[b + 1] = Vector3.up;  uvs[b + 1] = new Vector2(1f, v);
+            verts[b + 2] = left;          normals[b + 2] = -r.right;    uvs[b + 2] = new Vector2(0f, v);
+            verts[b + 3] = left + down;   normals[b + 3] = -r.right;    uvs[b + 3] = new Vector2(0.1f, v);
+            verts[b + 4] = right;         normals[b + 4] = r.right;     uvs[b + 4] = new Vector2(1f, v);
+            verts[b + 5] = right + down;  normals[b + 5] = r.right;     uvs[b + 5] = new Vector2(0.9f, v);
+        }
+
+        int t = 0;
+        for (int i = 0; i < count - 1; i++)
+        {
+            int a = i * PerRing;
+            int n = (i + 1) * PerRing;
+
+            // top surface
+            tris[t++] = a + 0; tris[t++] = n + 0; tris[t++] = a + 1;
+            tris[t++] = a + 1; tris[t++] = n + 0; tris[t++] = n + 1;
+            // right wall
+            tris[t++] = a + 5; tris[t++] = a + 4; tris[t++] = n + 4;
+            tris[t++] = a + 5; tris[t++] = n + 4; tris[t++] = n + 5;
+            // left wall
+            tris[t++] = a + 3; tris[t++] = n + 2; tris[t++] = a + 2;
+            tris[t++] = a + 3; tris[t++] = n + 3; tris[t++] = n + 2;
+        }
+
+        mesh.vertices = verts;
+        mesh.normals = normals;
+        mesh.uv = uvs;
+        mesh.triangles = tris;
+        mesh.RecalculateBounds();
+    }
+
+    void OnDestroy()
+    {
+        if (mesh == null) return;
+        if (Application.isPlaying) Destroy(mesh);
+        else DestroyImmediate(mesh);
+    }
+}
