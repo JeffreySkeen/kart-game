@@ -90,6 +90,7 @@ public class PlayerController : MonoBehaviour
     void FixedUpdate()
     {
         bool grounded = IsGrounded();
+        OnGround = grounded;
 
         Vector3 vel = rb.linearVelocity;
         Vector3 flat = new Vector3(vel.x, 0f, vel.z);
@@ -131,6 +132,9 @@ public class PlayerController : MonoBehaviour
     }
 
     bool touchingGround;
+
+    /// <summary>True when the kart was touching the ground during the last physics step.</summary>
+    public bool OnGround { get; private set; }
 
     // Grounded = touching something whose surface faces mostly up.
     void OnCollisionStay(Collision collision)
