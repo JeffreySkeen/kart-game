@@ -18,14 +18,14 @@ public enum TrackSegmentType
 public class TrackGenerator : MonoBehaviour
 {
     [Header("Layout")]
-    [SerializeField] List<TrackSegmentType> segments = new List<TrackSegmentType>();
+    [SerializeField] List<TrackSegmentType> segments = DefaultSegments();
     [Tooltip("Tick when the layout should end exactly where it started. Joins the last ring to the first.")]
     [SerializeField] bool closeLoop = true;
 
     [Header("Segment presets")]
     [SerializeField] float roadWidth = 16f;       // Straight.glb was 12; widened for easier driving
     [SerializeField] float straightLength = 16f;  // matches Straight.glb
-    [SerializeField] float turnRadius = 24f;      // radius of the road's center line
+    [SerializeField] float turnRadius = 32f;      // radius of the road's center line (the figure 8 needs 32)
     [SerializeField] float turnAngle = 90f;       // degrees per turn segment
     [SerializeField] float edgeDepth = 2f;        // how far the side walls drop below the surface
 
@@ -44,7 +44,18 @@ public class TrackGenerator : MonoBehaviour
     [Tooltip("On: a light on each side at every spot. Off: lights alternate left and right.")]
     [SerializeField] bool lightsBothSides = true;
 
+    [Header("Start / finish line")]
+    [SerializeField] bool buildFinishLine = true;
+    [Tooltip("Meters along the center line. Put it on a straight piece.")]
+    [SerializeField] float finishLineDistance = 8f;
+    [SerializeField] float lineSquareSize = 1f;       // size of one checker square; the line is two squares deep
+    [SerializeField] float lineHeight = 0.02f;        // lift above the road to avoid flicker
+
     const string LightsName = "Track Lights";
+    const string FinishLineName = "Finish Line";
+
+    Mesh lineMesh;
+    Material lineWhite, lineBlack;
 
     struct Ring
     {
@@ -55,16 +66,72 @@ public class TrackGenerator : MonoBehaviour
 
     Mesh mesh;
 
-    // Default layout: a rounded rectangle, 3 + 2 + 3 + 2 straights joined by four right turns.
+    // Figure 8 (needs Turn Radius 32 and Straight Length 16). One clockwise loop of three right turns and one
+    // counter-clockwise loop of three left turns. The two loops meet at a flat crossing, 16 m before the
+    // start point. Each list entry below is one segment: S = straight, R = right turn, L = left turn.
+    static List<TrackSegmentType> DefaultSegments()
+    {
+        const TrackSegmentType S = TrackSegmentType.Straight;
+        const TrackSegmentType R = TrackSegmentType.RightTurn;
+        const TrackSegmentType L = TrackSegmentType.LeftTurn;
+
+        return new List<TrackSegmentType>
+        {
+            S, S,                   // start straight (finish line here)
+            R, S, R, S, R,          // clockwise loop
+            S, S, S, S, S, S,       // back through the crossing and on into the second loop
+            L, S, L, S, L,          // counter-clockwise loop
+            S, S, S, S,             // up to the crossing again and back to the start
+        };
+    }
+
+    // The earlier layout: a rounded rectangle, 3 + 2 + 3 + 2 straights joined by four right turns (radius 24).
+    static List<TrackSegmentType> RoundedRectangleSegments()
+    {
+        const TrackSegmentType S = TrackSegmentType.Straight;
+        const TrackSegmentType R = TrackSegmentType.RightTurn;
+
+        return new List<TrackSegmentType>
+        {
+            S, S, S, R,
+            S, S, R,
+            S, S, S, R,
+            S, S, R,
+        };
+    }
+
+    [ContextMenu("Load Figure 8 Layout")]
+    void LoadFigure8Layout()
+    {
+        segments = DefaultSegments();
+        turnRadius = 32f;
+        straightLength = 16f;
+        turnAngle = 90f;
+        MarkChanged();
+        Rebuild();
+    }
+
+    [ContextMenu("Load Rounded Rectangle Layout")]
+    void LoadRoundedRectangleLayout()
+    {
+        segments = RoundedRectangleSegments();
+        turnRadius = 24f;
+        straightLength = 16f;
+        turnAngle = 90f;
+        MarkChanged();
+        Rebuild();
+    }
+
+    void MarkChanged()
+    {
+#if UNITY_EDITOR
+        UnityEditor.EditorUtility.SetDirty(this);
+#endif
+    }
+
     void Reset()
     {
-        segments = new List<TrackSegmentType>
-        {
-            TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.RightTurn,
-            TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.RightTurn,
-            TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.RightTurn,
-            TrackSegmentType.Straight, TrackSegmentType.Straight, TrackSegmentType.RightTurn,
-        };
+        segments = DefaultSegments();
 #if UNITY_EDITOR
         var lit = Shader.Find("Universal Render Pipeline/Lit");
         if (lit != null && roadMaterial == null) roadMaterial = new Material(lit) { color = new Color(0.25f, 0.25f, 0.28f) };
@@ -115,6 +182,119 @@ public class TrackGenerator : MonoBehaviour
         col.sharedMesh = mesh;
 
         RebuildLights(rings);
+        RebuildFinishLine(rings);
+    }
+
+    static void DestroyObject(Object o)
+    {
+        if (o == null) return;
+        if (Application.isPlaying) Destroy(o);
+        else DestroyImmediate(o);
+    }
+
+    Material MakeLineMaterial(Color color)
+    {
+        // Reuse the road's shader so the line gets the same lighting (and wet look) as the road.
+        Shader sh = roadMaterial != null ? roadMaterial.shader : null;
+#if UNITY_EDITOR
+        if (sh == null) sh = Shader.Find("Universal Render Pipeline/Lit");
+#endif
+        if (sh == null) return null;
+        var m = new Material(sh) { hideFlags = HideFlags.DontSave };
+        if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", color);
+        return m;
+    }
+
+    // A checkered strip across the road with a trigger box the kart drives through.
+    void RebuildFinishLine(List<Ring> rings)
+    {
+        for (int i = transform.childCount - 1; i >= 0; i--)
+        {
+            Transform child = transform.GetChild(i);
+            if (child.name != FinishLineName) continue;
+            child.name = FinishLineName + " (old)";
+            DestroyObject(child.gameObject);
+        }
+
+        if (!buildFinishLine || rings.Count < 2) return;
+
+        // Find the point on the center line at the requested distance
+        float d = Mathf.Clamp(finishLineDistance, 0f, rings[rings.Count - 1].dist);
+        int idx = 0;
+        while (idx < rings.Count - 2 && rings[idx + 1].dist < d) idx++;
+        Ring a = rings[idx];
+        Ring b = rings[idx + 1];
+        float u = Mathf.Clamp01((d - a.dist) / Mathf.Max(1e-4f, b.dist - a.dist));
+        Vector3 center = Vector3.Lerp(a.pos, b.pos, u);
+        Vector3 right = Vector3.Slerp(a.right, b.right, u).normalized;
+        Vector3 forward = Vector3.Cross(right, Vector3.up);
+
+        var go = new GameObject(FinishLineName) { hideFlags = HideFlags.DontSave };
+        go.transform.SetParent(transform, false);
+        go.transform.localPosition = center;
+        go.transform.localRotation = Quaternion.LookRotation(forward, Vector3.up);
+
+        // Checkered mesh in the line's own space: x across the road, z along it
+        int cols = Mathf.Max(2, Mathf.RoundToInt(roadWidth / Mathf.Max(0.1f, lineSquareSize)));
+        const int rows = 2;
+        float cellW = roadWidth / cols;
+        float cellD = Mathf.Max(0.1f, lineSquareSize);
+        float x0 = -roadWidth * 0.5f;
+        float z0 = -rows * cellD * 0.5f;
+
+        var verts = new List<Vector3>();
+        var normals = new List<Vector3>();
+        var uvs = new List<Vector2>();
+        var whiteTris = new List<int>();
+        var blackTris = new List<int>();
+
+        for (int r = 0; r < rows; r++)
+        {
+            for (int c = 0; c < cols; c++)
+            {
+                float xa = x0 + c * cellW, xb = xa + cellW;
+                float za = z0 + r * cellD, zb = za + cellD;
+                int v = verts.Count;
+                verts.Add(new Vector3(xa, lineHeight, za)); // 0: near left
+                verts.Add(new Vector3(xa, lineHeight, zb)); // 1: far left
+                verts.Add(new Vector3(xb, lineHeight, za)); // 2: near right
+                verts.Add(new Vector3(xb, lineHeight, zb)); // 3: far right
+                for (int k = 0; k < 4; k++) normals.Add(Vector3.up);
+                uvs.Add(new Vector2(0, 0)); uvs.Add(new Vector2(0, 1));
+                uvs.Add(new Vector2(1, 0)); uvs.Add(new Vector2(1, 1));
+
+                var tris = ((r + c) % 2 == 0) ? whiteTris : blackTris;
+                tris.Add(v + 0); tris.Add(v + 1); tris.Add(v + 2);
+                tris.Add(v + 2); tris.Add(v + 1); tris.Add(v + 3);
+            }
+        }
+
+        if (lineMesh == null) lineMesh = new Mesh { name = "Finish Line", hideFlags = HideFlags.DontSave };
+        lineMesh.Clear();
+        lineMesh.SetVertices(verts);
+        lineMesh.SetNormals(normals);
+        lineMesh.SetUVs(0, uvs);
+        lineMesh.subMeshCount = 2;
+        lineMesh.SetTriangles(whiteTris, 0);
+        lineMesh.SetTriangles(blackTris, 1);
+        lineMesh.RecalculateBounds();
+
+        DestroyObject(lineWhite);
+        DestroyObject(lineBlack);
+        lineWhite = MakeLineMaterial(new Color(0.92f, 0.92f, 0.92f));
+        lineBlack = MakeLineMaterial(new Color(0.04f, 0.04f, 0.04f));
+
+        go.AddComponent<MeshFilter>().sharedMesh = lineMesh;
+        var mr = go.AddComponent<MeshRenderer>();
+        mr.sharedMaterials = new[] { lineWhite, lineBlack };
+
+        // Trigger volume: full road width, tall enough for the kart, one meter deep
+        var trigger = go.AddComponent<BoxCollider>();
+        trigger.isTrigger = true;
+        trigger.center = new Vector3(0f, 2f, 0f);
+        trigger.size = new Vector3(roadWidth, 4f, 1f);
+
+        go.AddComponent<FinishLine>();
     }
 
     // Places the street light prefab along both sides of the center line. Lights are regenerated
@@ -152,17 +332,32 @@ public class TrackGenerator : MonoBehaviour
             Vector3 center = Vector3.Lerp(a.pos, b.pos, u);
             Vector3 right = Vector3.Slerp(a.right, b.right, u).normalized;
 
-            if (lightsBothSides)
+            float[] sides = lightsBothSides ? new[] { +1f, -1f } : new[] { placed % 2 == 0 ? +1f : -1f };
+            foreach (float side in sides)
             {
-                PlaceLight(container.transform, center, right, +1f, sideDistance, prefabOffset);
-                PlaceLight(container.transform, center, right, -1f, sideDistance, prefabOffset);
-            }
-            else
-            {
-                PlaceLight(container.transform, center, right, placed % 2 == 0 ? +1f : -1f, sideDistance, prefabOffset);
+                // Skip spots that would put a light on another part of the track (the figure 8 crossing)
+                Vector3 spot = center + right * (side * sideDistance);
+                if (IsOnAnotherRoad(rings, d, spot, total)) continue;
+                PlaceLight(container.transform, center, right, side, sideDistance, prefabOffset);
             }
             placed++;
         }
+    }
+
+    // True when a point lies on a part of the track that is far away along the path, such as at a crossing.
+    bool IsOnAnotherRoad(List<Ring> rings, float d, Vector3 p, float total)
+    {
+        float limit = roadWidth * 0.5f + 3f;
+        float limitSq = limit * limit;
+        foreach (Ring r in rings)
+        {
+            float along = Mathf.Abs(r.dist - d);
+            if (Mathf.Min(along, total - along) < 40f) continue; // own stretch of road
+            float dx = r.pos.x - p.x;
+            float dz = r.pos.z - p.z;
+            if (dx * dx + dz * dz < limitSq) return true;
+        }
+        return false;
     }
 
     // side: +1 = right edge, -1 = left edge. The light faces the road.
@@ -312,8 +507,9 @@ public class TrackGenerator : MonoBehaviour
 
     void OnDestroy()
     {
-        if (mesh == null) return;
-        if (Application.isPlaying) Destroy(mesh);
-        else DestroyImmediate(mesh);
+        DestroyObject(mesh);
+        DestroyObject(lineMesh);
+        DestroyObject(lineWhite);
+        DestroyObject(lineBlack);
     }
 }
