@@ -39,7 +39,6 @@ public class PlayerController : MonoBehaviour
     {
         rb = GetComponent<Rigidbody>();
         rb.interpolation = RigidbodyInterpolation.Interpolate; // smooth motion for the follow camera
-        rb.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
         leftWheel = SetupWheel(frontLeftWheel);
         rightWheel = SetupWheel(frontRightWheel);
     }
@@ -94,7 +93,8 @@ public class PlayerController : MonoBehaviour
 
         Vector3 vel = rb.linearVelocity;
         Vector3 flat = new Vector3(vel.x, 0f, vel.z);
-        float forwardSpeed = Vector3.Dot(flat, transform.forward);
+        // On the ground, measure speed along the kart's real (possibly tilted) forward, including the climb
+        float forwardSpeed = Vector3.Dot(grounded ? vel : flat, transform.forward);
 
         if (grounded)
         {
@@ -110,10 +110,8 @@ public class PlayerController : MonoBehaviour
             }
             forwardSpeed = Mathf.Clamp(forwardSpeed, -maxSpeed * 0.5f, maxSpeed);
 
-            // Kill sideways slip so the kart follows its heading
-            Vector3 newFlat = transform.forward * forwardSpeed;
-            vel.x = newFlat.x;
-            vel.z = newFlat.z;
+            // Kill sideways slip so the kart follows its heading, up and down slopes included
+            vel = transform.forward * forwardSpeed;
         }
 
         // Steering only turns the kart while it is moving; reverses when going backward

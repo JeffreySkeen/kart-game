@@ -281,6 +281,7 @@ GameObject:
   - component: {fileID: 4233155282586728395}
   - component: {fileID: 461629196702369528}
   - component: {fileID: 4367009501951331446}
+  - component: {fileID: 8183648887242253106}
   m_Layer: 0
   m_Name: Rear_L_Tire
   m_TagString: Untagged
@@ -360,6 +361,27 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!135 &8183648887242253106
+SphereCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 537058251500626641}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Radius: 0.33999997
+  m_Center: {x: 0.78999996, y: 0.33999974, z: -0.83000004}
 --- !u!1 &624564683858789949
 GameObject:
   m_ObjectHideFlags: 0
@@ -461,6 +483,7 @@ GameObject:
   - component: {fileID: 4707690974983178612}
   - component: {fileID: 4418927550439928336}
   - component: {fileID: 4398760650680107965}
+  - component: {fileID: 223265297520024422}
   m_Layer: 0
   m_Name: Rear_R_Tire
   m_TagString: Untagged
@@ -540,6 +563,27 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!135 &223265297520024422
+SphereCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 908778423782346883}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Radius: 0.33999997
+  m_Center: {x: -0.78999996, y: 0.33999974, z: -0.83000004}
 --- !u!1 &1324412478381375890
 GameObject:
   m_ObjectHideFlags: 0
@@ -676,6 +720,7 @@ GameObject:
   - component: {fileID: 1245913284499254807}
   - component: {fileID: 2006701676586622540}
   - component: {fileID: 4059309831745664451}
+  - component: {fileID: 5092109080846365316}
   m_Layer: 0
   m_Name: Front_R_Tire
   m_TagString: Untagged
@@ -755,6 +800,27 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!135 &5092109080846365316
+SphereCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1576046361296191573}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Radius: 0.28999996
+  m_Center: {x: -0.78999996, y: 0.29000023, z: 0.8399998}
 --- !u!1 &2187649066442158542
 GameObject:
   m_ObjectHideFlags: 0
@@ -5482,6 +5548,7 @@ GameObject:
   - component: {fileID: 4123277315415755324}
   - component: {fileID: 6225895716535631943}
   - component: {fileID: 9217184698151610574}
+  - component: {fileID: 1998764684451207012}
   m_Layer: 0
   m_Name: Front_L_Tire
   m_TagString: Untagged
@@ -5561,6 +5628,27 @@ MeshRenderer:
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_AdditionalVertexStreams: {fileID: 0}
+--- !u!135 &1998764684451207012
+SphereCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8524732767376528098}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Radius: 0.28999996
+  m_Center: {x: 0.78999996, y: 0.29000023, z: 0.8399998}
 --- !u!1 &8642177480990204689
 GameObject:
   m_ObjectHideFlags: 0
